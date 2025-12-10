@@ -189,4 +189,99 @@ function observer_mode_block_wp_insert_post_data($data, $postarr) {
  */
 add_filter('rest_pre_insert_post', 'observer_mode_block_rest_insert', 10, 3);
 add_filter('rest_pre_insert_page', 'observer_mode_block_rest_insert', 10, 3);
-function observer_mode_block_rest_insert($prepared_post, $reques_
+function observer_mode_block_rest_insert($prepared_post, $request, $creating) {
+
+    if (!observer_mode_is_observer()) {
+        return $prepared_post;
+    }
+
+    if (!class_exists('WP_REST_Request') || !($request instanceof WP_REST_Request)) {
+        return $prepared_post;
+    }
+
+    return new WP_Error(
+        'observer_mode_blocked',
+        __('Observer mode is enabled. Changes cannot be saved.', 'observer-mode'),
+        array('status' => 403)
+    );
+}
+
+/**
+ * Disable autosave endpoints for Observer Admin
+ */
+add_filter('rest_pre_dispatch', 'observer_mode_disable_autosave', 10, 3);
+function observer_mode_disable_autosave($result, $server, $request) {
+
+    if (!observer_mode_is_observer()) {
+        return $result;
+    }
+
+    if (!class_exists('WP_REST_Request') || !($request instanceof WP_REST_Request)) {
+        return $result;
+    }
+
+    $route = $request->get_route();
+
+    // Handle both posts and pages autosave endpoints which include parent IDs in the route
+    if (strpos($route, '/wp/v2/posts/') === 0 && strpos($route, '/autosaves') !== false) {
+        return new WP_Error(
+            'observer_mode_blocked',
+            __('Observer mode is enabled. Autosave is disabled.', 'observer-mode'),
+            array('status' => 403)
+        );
+    }
+
+    if (strpos($route, '/wp/v2/pages/') === 0 && strpos($route, '/autosaves') !== false) {
+        return new WP_Error(
+            'observer_mode_blocked',
+            __('Observer mode is enabled. Autosave is disabled.', 'observer-mode'),
+            array('status' => 403)
+        );
+    }
+
+    return $result;
+}
+
+/**
+ * Block write-capable REST methods for Observer Admins to cover any custom endpoints.
+ */
+add_filter('rest_request_before_callbacks', 'observer_mode_block_rest_writes', 10, 3);
+function observer_mode_block_rest_writes($response, $handler, $request) {
+
+    if (!observer_mode_is_observer()) {
+        return $response;
+    }
+
+    if (!class_exists('WP_REST_Request') || !($request instanceof WP_REST_Request)) {
+        return $response;
+    }
+
+    $method = $request->get_method();
+
+    // Allow read-only verbs and block the rest
+    if (in_array($method, array('GET', 'HEAD', 'OPTIONS'), true)) {
+        return $response;
+    }
+
+    return new WP_Error(
+        'observer_mode_blocked',
+        __('Observer mode is enabled. Changes cannot be saved.', 'observer-mode'),
+        array('status' => 403)
+    );
+}
+
+/**
+ * Prevent uploading media items
+ */
+add_filter('user_has_cap', 'observer_mode_block_media_uploads', 10, 4);
+function observer_mode_block_media_uploads($allcaps, $caps, $args, $user) {
+
+    if (!observer_mode_is_observer()) {
+        return $allcaps;
+    }
+
+    // Explicitly deny upload_files even if granted elsewhere
+    $allcaps['upload_files'] = false;
+
+    return $allcaps;
+}
